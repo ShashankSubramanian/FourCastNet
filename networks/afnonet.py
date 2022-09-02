@@ -38,6 +38,19 @@ class Mlp(nn.Module):
         x = self.drop(x)
         return x
 
+def spectral_filter(nr, nc):
+    spec_filt = np.ones((nr,nc))
+    x = (1 + np.cos(np.linspace(-np.pi/2, np.pi/2, nc))*640)
+    for i in range(nr):
+        cutoff = int(x[i])
+        spec_filt[i][cutoff:] = 0
+    return spec_filt.reshape((1,1,nr,nc))
+
+def filter_img(data, filt):
+    fft  = (torch.fft.rfft(data, dim=-1))
+    fft = fft * filt
+    ifft  = (torch.fft.irfft(fft, dim=-1))
+    return ifft
 
 class AFNO2D(nn.Module):
     def __init__(self, hidden_size, num_blocks=8, sparsity_threshold=0.01, hard_thresholding_fraction=1, hidden_size_factor=1):
@@ -195,6 +208,9 @@ class AFNONet(nn.Module):
         self.num_blocks = params.num_blocks 
         norm_layer = partial(nn.LayerNorm, eps=1e-6)
 
+        self.use_spec = False
+        self.spec_filt = torch.tensor(spectral_filter(img_size[0], img_size[1]//2+1)).to(self.params.device, dtype=torch.float)
+
         self.patch_embed = PatchEmbed(img_size=img_size, patch_size=self.patch_size, in_chans=self.in_chans, embed_dim=embed_dim)
         num_patches = self.patch_embed.num_patches
 
@@ -254,6 +270,8 @@ class AFNONet(nn.Module):
             h=self.img_size[0] // self.patch_size[0],
             w=self.img_size[1] // self.patch_size[1],
         )
+        if self.use_spec:
+            x = filter_img(x, self.spec_filt)
         return x
 
 
