@@ -86,6 +86,7 @@ class Trainer():
     self.params = params
     self.world_rank = world_rank
     self.device = torch.cuda.current_device() if torch.cuda.is_available() else 'cpu'
+    self.params.device = self.device
 
     if params.log_to_wandb:
       wandb.init(config=params, name=params.name, group=params.group, project=params.project, entity=params.entity)
