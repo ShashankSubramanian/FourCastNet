@@ -153,31 +153,25 @@ class GetDataset(Dataset):
     if self.files[year_idx] is None:
         self._open_file(year_idx)
 
+    step = self.dt
+    if self.two_step_training:
+        local_idx = local_idx %(self.n_samples_per_year - 2*self.dt)
+    else:
+        local_idx = local_idx %(self.n_samples_per_year - self.dt)
+
     if not self.precip:
       #if we are not at least self.dt*n_history timesteps into the prediction
       if local_idx < self.dt*self.n_history:
           local_idx += self.dt*self.n_history
-
-      #if we are on the last image in a year predict identity, else predict next timestep
-      step = 0 if local_idx >= self.n_samples_per_year-self.dt else self.dt
     else:
       inp_local_idx = local_idx
       tar_local_idx = local_idx
-      #if we are on the last image in a year predict identity, else predict next timestep
-      step = 0 if tar_local_idx >= self.n_samples_per_year-self.dt else self.dt
       # first year has 2 missing samples in precip (they are first two time points)
       if year_idx == 0:
         lim = 1458
         local_idx = local_idx%lim 
         inp_local_idx = local_idx + 2
         tar_local_idx = local_idx
-        step = 0 if tar_local_idx >= lim-self.dt else self.dt
-
-    #if two_step_training flag is true then ensure that local_idx is not the last or last but one sample in a year
-    if self.two_step_training:
-        if local_idx >= self.n_samples_per_year - 2*self.dt:
-            #set local_idx to last possible sample in a year that allows taking two steps forward
-            local_idx = self.n_samples_per_year - 3*self.dt
 
     if self.train and self.roll:
       y_roll = random.randint(0, self.img_shape_y)
