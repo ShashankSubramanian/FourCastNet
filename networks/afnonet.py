@@ -243,7 +243,7 @@ class AFNONet(nn.Module):
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, embed_dim))
         self.pos_drop = nn.Dropout(p=drop_rate)
 
-        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
+        dpr = [x.item() for x in torch.linspace(0, params.drop_path_rate, depth)]
 
         self.h = self.img_size[0] // self.patch_size[0]
         self.w = self.img_size[1] // self.patch_size[1]
