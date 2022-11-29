@@ -66,9 +66,9 @@ class AFNO2D(nn.Module):
         self.scale = 0.02
 
         self.w1 = nn.Parameter(self.scale * torch.randn(2, self.num_blocks, self.block_size, self.block_size * self.hidden_size_factor))
-        self.b1 = nn.Parameter(self.scale * torch.randn(2, self.num_blocks, self.block_size * self.hidden_size_factor))
+#        self.b1 = nn.Parameter(self.scale * torch.randn(2, self.num_blocks, self.block_size * self.hidden_size_factor))
         self.w2 = nn.Parameter(self.scale * torch.randn(2, self.num_blocks, self.block_size * self.hidden_size_factor, self.block_size))
-        self.b2 = nn.Parameter(self.scale * torch.randn(2, self.num_blocks, self.block_size))
+#        self.b2 = nn.Parameter(self.scale * torch.randn(2, self.num_blocks, self.block_size))
 
     def forward(self, x):
         bias = x
@@ -91,26 +91,30 @@ class AFNO2D(nn.Module):
 
         o1_real[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes] = F.relu(
             torch.einsum('...bi,bio->...bo', x[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes].real, self.w1[0]) - \
-            torch.einsum('...bi,bio->...bo', x[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes].imag, self.w1[1]) + \
-            self.b1[0]
+            torch.einsum('...bi,bio->...bo', x[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes].imag, self.w1[1]) 
+#            + \
+#            self.b1[0]
         )
 
         o1_imag[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes] = F.relu(
             torch.einsum('...bi,bio->...bo', x[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes].imag, self.w1[0]) + \
-            torch.einsum('...bi,bio->...bo', x[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes].real, self.w1[1]) + \
-            self.b1[1]
+            torch.einsum('...bi,bio->...bo', x[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes].real, self.w1[1]) 
+#            + \
+#            self.b1[1]
         )
 
         o2_real[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes]  = (
             torch.einsum('...bi,bio->...bo', o1_real[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes], self.w2[0]) - \
-            torch.einsum('...bi,bio->...bo', o1_imag[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes], self.w2[1]) + \
-            self.b2[0]
+            torch.einsum('...bi,bio->...bo', o1_imag[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes], self.w2[1]) 
+#            + \
+#            self.b2[0]
         )
 
         o2_imag[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes]  = (
             torch.einsum('...bi,bio->...bo', o1_imag[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes], self.w2[0]) + \
-            torch.einsum('...bi,bio->...bo', o1_real[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes], self.w2[1]) + \
-            self.b2[1]
+            torch.einsum('...bi,bio->...bo', o1_real[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes], self.w2[1]) 
+#            + \
+#            self.b2[1]
         )
 
         x = torch.stack([o2_real, o2_imag], dim=-1)
@@ -181,6 +185,23 @@ class PrecipNet(nn.Module):
         x = self.act(x)
         return x
 
+def glide_reflection(x, flip_dim=-2, glide_dim=-1):
+    n_ew = x.shape[glide_dim]
+    flipped_x = torch.flip(x, dims=(flip_dim,))
+    return torch.roll(flipped_x, shifts=n_ew // 2, dims=glide_dim)
+
+
+def sphere_to_torus(x, flip_dim=-2, glide_dim=-1):
+    """ Performs a sphere to torus mapping for lat/long by reflecting and
+    shifting the input so that both the x and y directions are periodic.
+    Currently assumes (..., c, h, w) format.
+    """
+    return torch.cat([x, glide_reflection(x, flip_dim=flip_dim, glide_dim=glide_dim)], dim=flip_dim)
+
+def torus_to_sphere(x, flip_dim=-2, glide_dim=-1):
+    b, c, h, w = x.shape
+    return .5*(glide_reflection(x[:, :, h//2:])+x[:, :, :h//2])
+
 class AFNONet(nn.Module):
     def __init__(
             self,
@@ -204,14 +225,19 @@ class AFNONet(nn.Module):
         self.patch_size = (params.patch_size, params.patch_size)
         self.in_chans = params.N_in_channels
         self.out_chans = params.N_out_channels
+        embed_dim = params.embed_dim
         self.num_features = self.embed_dim = embed_dim
         self.num_blocks = params.num_blocks 
         norm_layer = partial(nn.LayerNorm, eps=1e-6)
+        self.residual = self.params.residual
 
         self.use_spec = False
+        self.dfs = False
+        if self.dfs:
+            self.img_size = (2*img_size[0], img_size[1])
         self.spec_filt = torch.tensor(spectral_filter(img_size[0], img_size[1]//2+1)).to(self.params.device, dtype=torch.float)
 
-        self.patch_embed = PatchEmbed(img_size=img_size, patch_size=self.patch_size, in_chans=self.in_chans, embed_dim=embed_dim)
+        self.patch_embed = PatchEmbed(img_size=self.img_size, patch_size=self.patch_size, in_chans=self.in_chans, embed_dim=embed_dim)
         num_patches = self.patch_embed.num_patches
 
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, embed_dim))
@@ -219,8 +245,8 @@ class AFNONet(nn.Module):
 
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
 
-        self.h = img_size[0] // self.patch_size[0]
-        self.w = img_size[1] // self.patch_size[1]
+        self.h = self.img_size[0] // self.patch_size[0]
+        self.w = self.img_size[1] // self.patch_size[1]
 
         self.blocks = nn.ModuleList([
             Block(dim=embed_dim, mlp_ratio=mlp_ratio, drop=drop_rate, drop_path=dpr[i], norm_layer=norm_layer,
@@ -260,6 +286,12 @@ class AFNONet(nn.Module):
         return x
 
     def forward(self, x):
+        if self.residual:
+            residual = x
+
+        if self.dfs:
+            x = sphere_to_torus(x)
+
         x = self.forward_features(x)
         x = self.head(x)
         x = rearrange(
@@ -270,8 +302,13 @@ class AFNONet(nn.Module):
             h=self.img_size[0] // self.patch_size[0],
             w=self.img_size[1] // self.patch_size[1],
         )
+        if self.dfs:
+            x = torus_to_sphere(x)
         if self.use_spec:
             x = filter_img(x, self.spec_filt)
+        if self.residual:
+            x = x + residual
+
         return x
 
 
