@@ -68,7 +68,7 @@ from utils.img_utils import vis_precip
 import wandb
 from utils.weighted_acc_rmse import weighted_acc, weighted_rmse, weighted_rmse_torch, unlog_tp_torch
 from apex import optimizers
-from utils.darcy_loss import LpLoss
+from utils.darcy_loss import LpLoss, weighted_rmse_loss
 import matplotlib.pyplot as plt
 from collections import OrderedDict
 import pickle
@@ -94,7 +94,12 @@ class Trainer():
     logging.info('rank %d, begin data loader init'%world_rank)
     self.train_data_loader, self.train_dataset, self.train_sampler = get_data_loader(params, params.train_data_path, dist.is_initialized(), train=True)
     self.valid_data_loader, self.valid_dataset = get_data_loader(params, params.valid_data_path, dist.is_initialized(), train=False)
-    self.loss_obj = LpLoss()
+
+    if params.rmse_loss:
+        self.loss_obj = weighted_rmse_loss
+    else:
+        self.loss_obj = LpLoss(relative=params.relative_loss)
+
     logging.info('rank %d, data loader initialized'%world_rank)
 
     params.crop_size_x = self.valid_dataset.crop_size_x
@@ -148,6 +153,8 @@ class Trainer():
 
     if params.optimizer_type == 'FusedAdam':
       self.optimizer = optimizers.FusedAdam(self.model.parameters(), lr = params.lr)
+    elif params.optimizer_type == 'FusedLAMB':
+      self.optimizer = optimizers.FusedLAMB(self.model.parameters(), lr = params.lr, weight_decay=params.weight_decay, max_grad_norm=5.)
     else:
       self.optimizer = torch.optim.Adam(self.model.parameters(), lr = params.lr)
 
@@ -250,6 +257,7 @@ class Trainer():
     
     for i, data in enumerate(self.train_data_loader, 0):
       self.iters += 1
+
       # adjust_LR(optimizer, params, iters)
       data_start = time.time()
       inp, tar = map(lambda x: x.to(self.device, dtype = torch.float), data)      

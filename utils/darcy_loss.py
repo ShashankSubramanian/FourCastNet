@@ -25,6 +25,7 @@ import numpy as np
 import scipy.io
 import h5py
 import torch.nn as nn
+from utils.weighted_acc_rmse import weighted_rmse_torch_channels
 
 
 #################################################
@@ -33,6 +34,11 @@ import torch.nn as nn
 #
 #################################################
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+@torch.jit.script
+def weighted_rmse_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    result = weighted_rmse_torch_channels(pred, target)
+    return torch.mean(result)
 
 # reading data
 class MatReader(object):
@@ -178,7 +184,7 @@ class RangeNormalizer(object):
 
 #loss function with rel/abs Lp loss
 class LpLoss(object):
-    def __init__(self, d=2, p=2, size_average=True, reduction=True):
+    def __init__(self, d=2, p=2, size_average=True, reduction=True, relative=True):
         super(LpLoss, self).__init__()
 
         #Dimension and Lp-norm type are postive
@@ -188,6 +194,8 @@ class LpLoss(object):
         self.p = p
         self.reduction = reduction
         self.size_average = size_average
+
+        self.relative = relative
 
     def abs(self, x, y):
         num_examples = x.size()[0]
@@ -220,7 +228,10 @@ class LpLoss(object):
         return diff_norms/y_norms
 
     def __call__(self, x, y):
-        return self.rel(x, y)
+        if self.relative:
+            return self.rel(x, y)
+        else:
+            return self.abs(x, y)
 
 # Sobolev norm (HS norm)
 # where we also compare the numerical derivatives between the output and target
