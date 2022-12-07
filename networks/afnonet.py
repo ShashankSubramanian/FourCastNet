@@ -231,6 +231,8 @@ class AFNONet(nn.Module):
         norm_layer = partial(nn.LayerNorm, eps=1e-6)
         self.residual = self.params.residual
 
+        depth = params.depth
+
         self.use_spec = False
         self.dfs = False
         if self.dfs:
@@ -241,6 +243,7 @@ class AFNONet(nn.Module):
         num_patches = self.patch_embed.num_patches
 
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, embed_dim))
+        drop_rate = params.drop_rate
         self.pos_drop = nn.Dropout(p=drop_rate)
 
         dpr = [x.item() for x in torch.linspace(0, params.drop_path_rate, depth)]
