@@ -112,6 +112,13 @@ class GetDataset(Dataset):
   def _get_files_stats(self):
     self.files_paths = glob.glob(self.location + "/*.h5")
     self.files_paths.sort()
+    if self.params.add_extra_years:
+        if self.train:
+            valid_location  = self.location.replace("train", "test")
+            self.valid_files_paths = glob.glob(valid_location + "/*.h5")
+            self.valid_files_paths.sort() 
+            self.files_paths.extend(self.valid_files_paths)
+
     self.n_years = len(self.files_paths)
     with h5py.File(self.files_paths[0], 'r') as _f:
         logging.info("Getting file stats from {}".format(self.files_paths[0]))
@@ -127,7 +134,6 @@ class GetDataset(Dataset):
     logging.info("Found data at path {}. Number of examples: {}. Image Shape: {} x {} x {}".format(self.location, self.n_samples_total, self.img_shape_x, self.img_shape_y, self.n_in_channels))
     logging.info("Delta t: {} hours".format(6*self.dt))
     logging.info("Including {} hours of past history in training at a frequency of {} hours".format(6*self.dt*self.n_history, 6*self.dt))
-
 
   def _open_file(self, year_idx):
     _file = h5py.File(self.files_paths[year_idx], 'r')
